@@ -185,13 +185,49 @@ void tTJSNI_RegExp::Split(iTJSDispatch2 ** array, const ttstr &target, bool purg
 {
 	bool arrayallocated = false;
 	if(!*array) *array = TJSCreateArrayObject(), arrayallocated = true;
+	struct SplitRegexTryCatchBlock
+	{
+		iTJSDispatch2 ** array;
+		ttstr target;
+		bool purgeempty;
+		bool arrayallocated;
+		tjs_error retvalue;
+		tTJSNI_RegExp *tthis;
+		SplitRegexTryCatchBlock(tTJSNI_RegExp *tthis, iTJSDispatch2 ** array, const ttstr &target, bool purgeempty, bool arrayallocated)
+		{
+			this->tthis = tthis;
+			this->array = array;
+			this->target = target;
+			this->purgeempty = purgeempty;
+			this->arrayallocated = arrayallocated;
+			this->retvalue = TJS_S_OK;
+		}
+		tjs_error callback(void)
+		{
+			TVPDoTryBlock(TryBlock, CatchBlock, 0, this);
+			return this->retvalue;
+		}
+		void try_block(void)
+		{
+			split_regex( target, *array, this->tthis, purgeempty );
+		}
+		bool catch_block(void)
+		{
+			if(arrayallocated) (*array)->Release();
+			return true;
+		}
+		static void TJS_USERENTRY TryBlock(void *p)
+		{
+			((SplitRegexTryCatchBlock*)p)->try_block();
+		}
+		static bool TJS_USERENTRY CatchBlock(void *p, const tTVPExceptionDesc &d)
+		{
+			return ((SplitRegexTryCatchBlock*)p)->catch_block();
+		}
+	};
+	SplitRegexTryCatchBlock tcb(this, array, target, purgeempty, arrayallocated);
 
-	try {
-		split_regex( target, *array, this, purgeempty );
-	} catch(...) {
-		if(arrayallocated) (*array)->Release();
-		throw;
-	}
+	tcb.callback();
 }
 //---------------------------------------------------------------------------
 
@@ -280,25 +316,57 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/_compile)
 
 	tjs_uint32 flags = TJSGetRegExpFlagsFromString(p);
 
-	try
+	struct CompileRegexTryCatchBlock
 	{
-		if( _this->RegEx ) {
-			onig_free( _this->RegEx );
-			_this->RegEx = NULL;
+		regex_t** regex;
+		const tjs_char *exprstart;
+		ttstr expr;
+		tjs_uint32 flags;
+		tjs_error retvalue;
+		CompileRegexTryCatchBlock(regex_t** regex, const tjs_char *exprstart, ttstr expr, tjs_uint32 flags)
+		{
+			this->regex = regex;
+			this->exprstart = exprstart;
+			this->expr = expr;
+			this->flags = flags;
+			this->retvalue = TJS_S_OK;
 		}
-		OnigErrorInfo einfo;
-		int r = onig_new( &(_this->RegEx), (UChar*)exprstart, (UChar*)(expr.c_str()+expr.length()),
-			flags&((ONIG_OPTION_MAXBIT<<1)-1), ONIG_ENCODING_UTF16_LE, ONIG_SYNTAX_PERL, &einfo );
-		if( r ) {
-			char s[ONIG_MAX_ERROR_MESSAGE_LEN];
-			onig_error_code_to_str( (UChar* )s, r, &einfo );
-			TJS_eTJSError( s );
+		tjs_error callback(void)
+		{
+			TVPDoTryBlock(TryBlock, CatchBlock, 0, this);
+			return this->retvalue;
 		}
-	}
-	catch(std::exception &e)
-	{
-		TJS_eTJSError(e.what());
-	}
+		void try_block(void)
+		{
+			if( *(this->regex) ) {
+				onig_free( *(this->regex) );
+				*(this->regex) = NULL;
+			}
+			OnigErrorInfo einfo;
+			int r = onig_new( this->regex, (UChar*)this->exprstart, (UChar*)(this->expr.c_str()+this->expr.length()),
+				this->flags&((ONIG_OPTION_MAXBIT<<1)-1), ONIG_ENCODING_UTF16_LE, ONIG_SYNTAX_PERL, &einfo );
+			if( r ) {
+				char s[ONIG_MAX_ERROR_MESSAGE_LEN];
+				onig_error_code_to_str( (UChar* )s, r, &einfo );
+				TJS_eTJSError( s );
+			}
+		}
+		bool catch_block(void)
+		{
+			return true;
+		}
+		static void TJS_USERENTRY TryBlock(void *p)
+		{
+			((CompileRegexTryCatchBlock*)p)->try_block();
+		}
+		static bool TJS_USERENTRY CatchBlock(void *p, const tTVPExceptionDesc &d)
+		{
+			return ((CompileRegexTryCatchBlock*)p)->catch_block();
+		}
+	};
+	CompileRegexTryCatchBlock tcb(&(_this->RegEx), exprstart, expr, flags);
+
+	tcb.callback();
 
 	_this->Flags = flags;
 
@@ -714,17 +782,50 @@ iTJSDispatch2 * tTJSNC_RegExp::GetResultArray( bool matched, const tjs_char *tar
 			tTJSVariant val(TJS_W(""));
 			array->PropSetByNum(TJS_MEMBERENSURE|TJS_IGNOREPROP, 0, &val, array);
 		} else {
-			tjs_uint size = region->num_regs;
-			try {
-				for( tjs_uint i = 0; i < size; i++ ) {
-					tTJSVariant val;
-					val = ttstr( target+(region->beg[i]/sizeof(tjs_char)), (region->end[i] - region->beg[i])/sizeof(tjs_char) );
-					array->PropSetByNum(TJS_MEMBERENSURE|TJS_IGNOREPROP, i, &val, array);
+			struct GetResultArrayTryCatchBlock
+			{
+				const tjs_char * target;
+				const OnigRegion* region;
+				iTJSDispatch2 *array;
+				tjs_error retvalue;
+				GetResultArrayTryCatchBlock(const tjs_char * target, const OnigRegion* region, iTJSDispatch2 *array)
+				{
+					this->target = target;
+					this->region = region;
+					this->array = array;
+					this->retvalue = TJS_S_OK;
 				}
-			} catch(...) {
-				array->Release();
-				throw;
-			}
+				tjs_error callback(void)
+				{
+					TVPDoTryBlock(TryBlock, CatchBlock, 0, this);
+					return this->retvalue;
+				}
+				void try_block(void)
+				{
+					tjs_uint size = region->num_regs;
+					for( tjs_uint i = 0; i < size; i++ ) {
+						tTJSVariant val;
+						val = ttstr( target+(region->beg[i]/sizeof(tjs_char)), (region->end[i] - region->beg[i])/sizeof(tjs_char) );
+						array->PropSetByNum(TJS_MEMBERENSURE|TJS_IGNOREPROP, i, &val, array);
+					}
+				}
+				bool catch_block(void)
+				{
+					array->Release();
+					return true;
+				}
+				static void TJS_USERENTRY TryBlock(void *p)
+				{
+					((GetResultArrayTryCatchBlock*)p)->try_block();
+				}
+				static bool TJS_USERENTRY CatchBlock(void *p, const tTVPExceptionDesc &d)
+				{
+					return ((GetResultArrayTryCatchBlock*)p)->catch_block();
+				}
+			};
+			GetResultArrayTryCatchBlock tcb(target, region, array);
+
+			tcb.callback();
 		}
 	}
 	return array;
