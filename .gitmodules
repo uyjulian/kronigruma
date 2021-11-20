@@ -4,6 +4,8 @@
 [submodule "external/00_simplebinder"]
 	path = external/00_simplebinder
 	url = https://github.com/uyjulian/00_simplebinder.git
+	ignore = dirty
 [submodule "external/onigruma"]
 	path = external/onigruma
 	url = https://github.com/kkos/oniguruma.git
+	ignore = dirty
